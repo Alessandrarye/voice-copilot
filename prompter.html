@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seminar Copilot</title>
+<style>
+  /* Teleprompter conventions: true black to kill screen glow, warm amber for
+     the live answer, big humanist type. System font stack on purpose — no
+     network dependency mid-seminar. */
+  :root {
+    --bg: #000000;
+    --answer: #ffb454;
+    --answer-dim: #b8b2a7;
+    --question: #6f8f6f;
+    --ticker: #4a4a4a;
+    --status: #2e6b3a;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: var(--bg); }
+  body {
+    font-family: "Segoe UI", "Ubuntu", "Helvetica Neue", sans-serif;
+    color: var(--answer-dim);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #feed {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4vh 8vw 12vh;
+    scroll-behavior: smooth;
+  }
+  .entry { margin-bottom: 7vh; }
+  .entry .q {
+    color: var(--question);
+    font-size: clamp(1rem, 2.2vw, 1.5rem);
+    line-height: 1.4;
+    margin-bottom: 1.2vh;
+  }
+  .entry .a {
+    color: var(--answer-dim);
+    font-size: clamp(1.6rem, 4vw, 3rem);
+    line-height: 1.45;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    max-width: 28ch;
+  }
+  .entry.current .a { color: var(--answer); }
+
+  #thinking {
+    display: none;
+    color: var(--question);
+    font-size: clamp(1.2rem, 2.5vw, 1.8rem);
+    padding: 0 8vw 2vh;
+  }
+  #thinking.on { display: block; }
+  #thinking .dots::after {
+    content: "";
+    animation: dots 1.4s steps(4, end) infinite;
+  }
+  @keyframes dots { 0% {content:""} 25% {content:"."} 50% {content:".."} 75% {content:"..."} }
+  @media (prefers-reduced-motion: reduce) {
+    #feed { scroll-behavior: auto; }
+    #thinking .dots::after { animation: none; content: "..."; }
+  }
+
+  #bar {
+    display: flex;
+    align-items: center;
+    gap: 1.2rem;
+    padding: 1.4vh 8vw 2vh;
+    border-top: 1px solid #161616;
+  }
+  #ticker {
+    flex: 1;
+    color: var(--ticker);
+    font-size: clamp(0.85rem, 1.6vw, 1.1rem);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    direction: rtl; /* keep newest words visible on the right */
+    text-align: left;
+  }
+  #ticker span { direction: ltr; unicode-bidi: embed; }
+  #ask {
+    background: none;
+    border: 1px solid var(--status);
+    color: var(--status);
+    font: inherit;
+    font-size: clamp(0.85rem, 1.6vw, 1.05rem);
+    padding: 0.5em 1.1em;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  #ask:hover, #ask:focus-visible { color: #7fce8f; border-color: #7fce8f; outline: none; }
+  #dot {
+    width: 0.65rem; height: 0.65rem; border-radius: 50%;
+    background: #7a2020; flex: none;
+  }
+  #dot.live { background: var(--status); }
+</style>
+</head>
+<body>
+  <div id="feed">
+    <div class="entry current">
+      <div class="a">Waiting for the first question. Answers appear here in reading order — newest at the bottom.</div>
+    </div>
+  </div>
+  <div id="thinking">Answering<span class="dots"></span></div>
+  <div id="bar">
+    <div id="dot" title="connection"></div>
+    <div id="ticker"><span id="tickertext">live transcript will stream here</span></div>
+    <button id="ask">Answer last 30s</button>
+  </div>
+
+<script>
+  const feed = document.getElementById("feed");
+  const thinking = document.getElementById("thinking");
+  const tickertext = document.getElementById("tickertext");
+  const dot = document.getElementById("dot");
+  let tickerWords = [];
+  let ws;
+
+  function connect() {
+    ws = new WebSocket(`ws://${location.host}/ws`);
+    ws.onopen = () => dot.classList.add("live");
+    ws.onclose = () => { dot.classList.remove("live"); setTimeout(connect, 1500); };
+    ws.onmessage = (ev) => {
+      const m = JSON.parse(ev.data);
+      if (m.type === "transcript") {
+        tickerWords.push(m.text);
+        tickerWords = tickerWords.slice(-12);
+        tickertext.textContent = tickerWords.join(" ");
+      } else if (m.type === "thinking") {
+        thinking.classList.add("on");
+      } else if (m.type === "answer") {
+        thinking.classList.remove("on");
+        document.querySelectorAll(".entry.current").forEach(e => e.classList.remove("current"));
+        const div = document.createElement("div");
+        div.className = "entry current";
+        const q = document.createElement("div");
+        q.className = "q";
+        q.textContent = m.question;
+        const a = document.createElement("div");
+        a.className = "a";
+        a.textContent = m.answer;
+        div.append(q, a);
+        feed.appendChild(div);
+        feed.scrollTop = feed.scrollHeight;
+      } else if (m.type === "skipped" || m.type === "error") {
+        thinking.classList.remove("on");
+        if (m.type === "error") console.error(m.message);
+      }
+    };
+  }
+  connect();
+
+  document.getElementById("ask").addEventListener("click", () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "ask_now" }));
+    }
+  });
+</script>
+</body>
+</html>

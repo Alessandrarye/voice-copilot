@@ -1,0 +1,25 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Personal data: briefings, transcripts, and derived notes stay local.
+# These contain class content and personal career/project details.
+transcripts/
+summaries/
+course-notes.md
+course-digest.md
+capstone.md
+interview.md
+footnote.md
+tooling.md
+test-context.md
+*.state.json
+
+# Media outputs
+frames/
+*.mkv
+*.mp4
+
+# Environment
+.env
