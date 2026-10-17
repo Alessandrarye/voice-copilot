@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mock Interviewer</title>
+<style>
+  :root {
+    --bg: #000000;
+    --question: #ffb454;
+    --critique: #8fb3d9;
+    --better: #7fce8f;
+    --heard: #4a4a4a;
+    --status: #2e6b3a;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: var(--bg); }
+  body {
+    font-family: "Segoe UI", "Ubuntu", "Helvetica Neue", sans-serif;
+    color: #b8b2a7;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #main { flex: 1; overflow-y: auto; padding: 4vh 8vw 3vh; }
+  .coach { display: none; margin-bottom: 3.5vh; max-width: 62ch; }
+  .coach.on { display: block; }
+  .coach .label { font-size: 0.85em; margin-bottom: 0.4em; }
+  #critique { color: var(--critique); font-size: clamp(0.95rem, 2vw, 1.3rem); line-height: 1.5; }
+  #critique .label { color: #5a7a9a; }
+  #better { color: var(--better); font-size: clamp(0.95rem, 2vw, 1.3rem); line-height: 1.5; }
+  #better .label { color: #4e8a5c; }
+  #example { color: #c9a7e0; font-size: clamp(0.95rem, 2vw, 1.3rem); line-height: 1.5; }
+  #example .label { color: #8a6aa0; }
+
+  #question {
+    color: var(--question);
+    font-size: clamp(1.5rem, 3.4vw, 2.4rem);
+    line-height: 1.4;
+    font-weight: 500;
+    max-width: 34ch;
+  }
+  #state {
+    margin-top: 2.5vh;
+    font-size: clamp(1rem, 2vw, 1.3rem);
+    color: #6f8f6f;
+    min-height: 1.5em;
+  }
+  #state.speaking { color: #b08a3e; }
+
+  #heardwrap {
+    padding: 0 8vw 1.5vh;
+    color: var(--heard);
+    font-size: clamp(0.85rem, 1.6vw, 1.05rem);
+    min-height: 2.2em;
+  }
+  #heardwrap .label { color: #333; margin-right: 0.6em; }
+
+  #bar {
+    display: flex; align-items: center; gap: 1rem;
+    padding: 1.4vh 8vw 2.2vh; border-top: 1px solid #161616;
+  }
+  button {
+    background: none; font: inherit;
+    font-size: clamp(0.9rem, 1.7vw, 1.1rem);
+    padding: 0.55em 1.2em; border-radius: 4px; cursor: pointer;
+  }
+  button:disabled { opacity: 0.35; cursor: default; }
+  #begin { border: 1px solid var(--status); color: #7fce8f; }
+  #done { border: 1px solid var(--question); color: var(--question); display: none; }
+  #skip { border: 1px solid #555; color: #888; display: none; }
+  #exampleBtn { border: 1px solid #8a6aa0; color: #c9a7e0; display: none; }
+  button:not(:disabled):hover, button:focus-visible { filter: brightness(1.3); outline: none; }
+  #dot { width: 0.65rem; height: 0.65rem; border-radius: 50%; background: #7a2020; margin-left: auto; }
+  #dot.live { background: var(--status); }
+</style>
+</head>
+<body>
+  <div id="main">
+    <div id="critique" class="coach"><div class="label">On your last answer</div><div id="ctext"></div></div>
+    <div id="better" class="coach"><div class="label">A stronger way to say it</div><div id="btext"></div></div>
+    <div id="question">Press Begin when you're ready. Questions appear here; answer out loud, then press Done answering.</div>
+    <div id="example" class="coach"><div class="label">An example answer</div><div id="etext"></div></div>
+    <div id="state"></div>
+  </div>
+  <div id="heardwrap"><span class="label">heard:</span><span id="heard"></span></div>
+  <div id="bar">
+    <button id="begin">Begin interview</button>
+    <button id="done">Done answering</button>
+    <button id="exampleBtn">Show example answer</button>
+    <button id="skip">Skip question</button>
+    <div id="dot" title="connection"></div>
+  </div>
+
+<script>
+  const q = document.getElementById("question");
+  const critique = document.getElementById("critique");
+  const ctext = document.getElementById("ctext");
+  const better = document.getElementById("better");
+  const btext = document.getElementById("btext");
+  const state = document.getElementById("state");
+  const heard = document.getElementById("heard");
+  const dot = document.getElementById("dot");
+  const beginBtn = document.getElementById("begin");
+  const doneBtn = document.getElementById("done");
+  const skipBtn = document.getElementById("skip");
+  const exampleBtn = document.getElementById("exampleBtn");
+  const example = document.getElementById("example");
+  const etext = document.getElementById("etext");
+  let heardWords = [];
+  let ws;
+
+  function send(type) {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type }));
+  }
+
+  function connect() {
+    ws = new WebSocket(`ws://${location.host}/ws`);
+    ws.onopen = () => dot.classList.add("live");
+    ws.onclose = () => { dot.classList.remove("live"); setTimeout(connect, 1500); };
+    ws.onmessage = (ev) => {
+      const m = JSON.parse(ev.data);
+      if (m.type === "thinking") {
+        state.textContent = "Interviewer is thinking...";
+        state.classList.remove("speaking");
+        doneBtn.disabled = true; skipBtn.disabled = true; exampleBtn.disabled = true;
+      } else if (m.type === "turn") {
+        beginBtn.style.display = "none";
+        if (m.critique) { ctext.textContent = m.critique; critique.classList.add("on"); }
+        else { critique.classList.remove("on"); }
+        if (m.better) { btext.textContent = m.better; better.classList.add("on"); }
+        else { better.classList.remove("on"); }
+        q.textContent = m.question;
+        example.classList.remove("on");
+        heardWords = []; heard.textContent = "";
+        state.textContent = "Interviewer is speaking...";
+        state.classList.add("speaking");
+        doneBtn.style.display = "inline-block";
+        skipBtn.style.display = "inline-block";
+        exampleBtn.style.display = "inline-block";
+        doneBtn.disabled = true; skipBtn.disabled = true; exampleBtn.disabled = true;
+      } else if (m.type === "listening") {
+        state.textContent = "Your turn. Answer out loud.";
+        state.classList.remove("speaking");
+        doneBtn.disabled = false; skipBtn.disabled = false; exampleBtn.disabled = false;
+      } else if (m.type === "example") {
+        etext.textContent = m.text;
+        example.classList.add("on");
+      } else if (m.type === "heard") {
+        heardWords.push(m.text);
+        heardWords = heardWords.slice(-14);
+        heard.textContent = heardWords.join(" ");
+      } else if (m.type === "error") {
+        state.textContent = "Error: " + m.message;
+        doneBtn.disabled = false; skipBtn.disabled = false; exampleBtn.disabled = false;
+      }
+    };
+  }
+  connect();
+
+  beginBtn.addEventListener("click", () => send("begin"));
+  doneBtn.addEventListener("click", () => send("done"));
+  skipBtn.addEventListener("click", () => send("skip"));
+  exampleBtn.addEventListener("click", () => send("example"));
+</script>
+</body>
+</html>
