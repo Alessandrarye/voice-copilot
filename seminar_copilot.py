@@ -12,9 +12,10 @@ Usage:
     python seminar_copilot.py --source <name>         # run it
     python seminar_copilot.py                          # auto-picks first .monitor
 
-Then open http://localhost:8765 in a browser for the teleprompter.
+Then open http://localhost:8770 in a browser for the teleprompter.
 """
 
+import os
 import argparse
 import asyncio
 import json
@@ -27,7 +28,7 @@ from pathlib import Path
 
 import numpy as np
 import uvicorn
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, APIConnectionError, APITimeoutError
 from dotenv import load_dotenv
 # Load ANTHROPIC_API_KEY (and anything else) from this project's own .env;
 # values there take precedence over the shell environment.
@@ -39,11 +40,11 @@ from fastapi.responses import HTMLResponse
 # ---------------- Config ----------------
 SAMPLE_RATE = 16000
 CHUNK_SECONDS = 5           # audio window per transcription pass
-CONTEXT_WINDOW_SECONDS = 120  # rolling transcript context sent to Claude
+CONTEXT_WINDOW_SECONDS = int(os.environ.get("CONTEXT_WINDOW_SECONDS", "120"))  # rolling transcript context sent to Claude
 MIN_SECONDS_BETWEEN_AUTO = 20 # throttle auto-triggered questions
 WHISPER_MODEL = "small.en"    # good speed/accuracy balance on GPU; try "medium.en" if you have headroom
 CLAUDE_MODEL = "claude-sonnet-5"
-PORT = 8765
+PORT = 8770
 TRANSCRIPT_DIR = Path.home() / "dev" / "seminar-copilot" / "transcripts"
 EXTRA_CONTEXT = ""
 BRIEF_TEXT = ""  # --brief file, injected whole into the system prompt
@@ -69,6 +70,26 @@ SYSTEM_PROMPT = (
     "changes the answer, use it. If the question is unclear or not really a "
     "question, reply with exactly: SKIP"
 )
+
+DEMO_ADDENDUM = (
+    " You are assisting the presenter during her own capstone demo, and the "
+    "rolling transcript includes what she herself has already said out loud. "
+    "Before answering, check whether she already covered the point in her "
+    "narration. If she did, do not repeat it. Open with a few words that "
+    "acknowledge it, such as 'I touched on this earlier,' and then add "
+    "something new: a different angle, one level more technical detail, a "
+    "concrete example, or the trade-off behind the choice. If she has not "
+    "covered it, answer directly from the briefing files. Read how the "
+    "question is asked and shape the first sentence to match it. A skeptical "
+    "or challenging question gets the honest concession first and then the "
+    "evidence. A curious or technical question gets the mechanism first. A "
+    "practical or business question gets the shop-owner consequence first. "
+    "Write in the first person as the presenter. If the text looks like the "
+    "presenter narrating her own slides rather than a question from the "
+    "audience, reply with exactly: SKIP"
+)
+if os.environ.get("COPILOT_MODE") == "demo":
+    SYSTEM_PROMPT = SYSTEM_PROMPT + DEMO_ADDENDUM
 
 BRIEF_INSTRUCTION = (
     "Answer every question in 2 to 4 sentences, warm and plain, suitable for "
@@ -166,25 +187,56 @@ async def handle_question(question: str, manual: bool = False):
     context = recent_transcript(CONTEXT_WINDOW_SECONDS)
     await broadcast({"type": "thinking", "question": question})
     try:
-        resp = await claude.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=400,
-            system=system_blocks(),
-            messages=[{
-                "role": "user",
-            "content": (
-                        (f"Reference material about the presenter's project. When a "
-                         f"question matches something covered here, base the answer "
-                         f"on this material and its prepared answers:\n{EXTRA_CONTEXT}\n\n"
-                         if EXTRA_CONTEXT else "")
-                        + f"Rolling transcript (last {CONTEXT_WINDOW_SECONDS}s):\n"
-                        f"{context}\n\n"
-                        f"Question to answer:\n{question}"
-                    ), 
-            }],           
-        )
-        answer = "".join(b.text for b in resp.content if b.type == "text").strip()
-        if answer == "SKIP" and not manual:
+        content = []
+        if EXTRA_CONTEXT:
+            content.append({
+                "type": "text",
+                "text": (
+                    "Reference material about the presenter's project. When a "
+                    "question matches something covered here, base the answer "
+                    "on this material and its prepared answers:\n"
+                    f"{EXTRA_CONTEXT}"
+                ),
+                "cache_control": {"type": "ephemeral"},
+            })
+        content.append({
+            "type": "text",
+            "text": (
+                f"Rolling transcript (last {CONTEXT_WINDOW_SECONDS}s):\n"
+                f"{context}\n\n"
+                f"Question to answer:\n{question}"
+            ),
+        })
+        answer = ""
+        started = False
+        for _attempt in range(3):
+            try:
+                async with claude.messages.stream(
+                    model=CLAUDE_MODEL,
+                    max_tokens=400,
+                    system=system_blocks(),
+                    messages=[{"role": "user", "content": content}],
+                ) as stream:
+                    async for text in stream.text_stream:
+                        answer += text
+                        head = answer.strip()
+                        if not started:
+                            if len(head) <= 4 and "SKIP".startswith(head):
+                                continue
+                            if head.startswith("SKIP"):
+                                break
+                            started = True
+                        await broadcast({"type": "answer_chunk", "question": question, "answer": head})
+                break
+            except (APIConnectionError, APITimeoutError) as _e:
+                if _attempt == 2:
+                    raise
+                print(f"[claude] connection problem, retrying ({_attempt + 1}/2): {_e}")
+                answer = ""
+                started = False
+                await asyncio.sleep(1.5)
+        answer = answer.strip()
+        if answer.startswith("SKIP") and not manual:
             await broadcast({"type": "skipped"})
             return
         await broadcast({"type": "answer", "question": question, "answer": answer})

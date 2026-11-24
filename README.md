@@ -78,7 +78,7 @@ python seminar_copilot.py --list-sources
 python seminar_copilot.py --source <name> [--context briefing1.md briefing2.md ...]
 ```
 
-Teleprompter at http://localhost:8765 (any device on the LAN works as
+Teleprompter at http://localhost:8770 (any device on the LAN works as
 the display). See run.sh for a launcher template; setup_audio.sh builds
 the merged mic+speakers source.
 

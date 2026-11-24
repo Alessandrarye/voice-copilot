@@ -154,9 +154,10 @@ def speak(text: str):
     try:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             wav = f.name
+        env = {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"}    
         subprocess.run(
             ["piper", "--model", VOICE_MODEL, "--output_file", wav],
-            input=text.encode(), check=True,
+            input=text.encode(), check=True, env=env,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         subprocess.run(["paplay", wav], check=True)
