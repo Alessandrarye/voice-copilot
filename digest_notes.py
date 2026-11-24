@@ -20,6 +20,10 @@ import sys
 from pathlib import Path
 
 from anthropic import Anthropic
+from dotenv import load_dotenv
+# Load ANTHROPIC_API_KEY (and anything else) from this project's own .env;
+# values there take precedence over the shell environment.
+load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
 BASE = Path.home() / "dev" / "seminar-copilot"
 SUMMARY_DIR = BASE / "summaries"

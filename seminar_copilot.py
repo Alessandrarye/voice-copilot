@@ -28,6 +28,10 @@ from pathlib import Path
 import numpy as np
 import uvicorn
 from anthropic import AsyncAnthropic
+from dotenv import load_dotenv
+# Load ANTHROPIC_API_KEY (and anything else) from this project's own .env;
+# values there take precedence over the shell environment.
+load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 from faster_whisper import WhisperModel
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
@@ -42,6 +46,7 @@ CLAUDE_MODEL = "claude-sonnet-5"
 PORT = 8765
 TRANSCRIPT_DIR = Path.home() / "dev" / "seminar-copilot" / "transcripts"
 EXTRA_CONTEXT = ""
+BRIEF_TEXT = ""  # --brief file, injected whole into the system prompt
 
 
 def log_line(text: str):
@@ -64,6 +69,26 @@ SYSTEM_PROMPT = (
     "changes the answer, use it. If the question is unclear or not really a "
     "question, reply with exactly: SKIP"
 )
+
+BRIEF_INSTRUCTION = (
+    "Answer every question in 2 to 4 sentences, warm and plain, suitable for "
+    "reading aloud to family. This overrides any other length guidance. Base "
+    "your answers on the briefing below and use its specifics (names, numbers, "
+    "equipment) when they apply.\n\n"
+    "BRIEFING:\n"
+)
+
+
+def system_blocks():
+    """System prompt as content blocks; the brief (if any) is a cached block."""
+    blocks = [{"type": "text", "text": SYSTEM_PROMPT}]
+    if BRIEF_TEXT:
+        blocks.append({
+            "type": "text",
+            "text": BRIEF_INSTRUCTION + BRIEF_TEXT,
+            "cache_control": {"type": "ephemeral"},
+        })
+    return blocks
 
 # ---------------- State ----------------
 transcript_buffer = deque()   # (timestamp, text)
@@ -144,7 +169,7 @@ async def handle_question(question: str, manual: bool = False):
         resp = await claude.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=400,
-            system=SYSTEM_PROMPT,
+            system=system_blocks(),
             messages=[{
                 "role": "user",
             "content": (
@@ -261,7 +286,15 @@ if __name__ == "__main__":
     ap.add_argument("--source", help="PulseAudio/PipeWire source name")
     ap.add_argument("--list-sources", action="store_true")
     ap.add_argument("--context", nargs="+", help="one or more briefing files")
+    ap.add_argument("--brief", help="briefing file included whole in the system prompt")
     args = ap.parse_args()
+    if args.brief:
+        brief_path = Path(args.brief).expanduser()
+        if not brief_path.exists():
+            sys.exit(f"[brief] file not found: {args.brief}")
+        BRIEF_TEXT = brief_path.read_text()
+        print(f"[brief] loaded {brief_path.name} into system prompt "
+              f"({len(BRIEF_TEXT.split())} words, {len(BRIEF_TEXT)} chars)")
     if args.context:
         loaded = []
         for p in args.context:

@@ -30,6 +30,10 @@ from pathlib import Path
 import numpy as np
 import uvicorn
 from anthropic import AsyncAnthropic
+from dotenv import load_dotenv
+# Load ANTHROPIC_API_KEY (and anything else) from this project's own .env;
+# values there take precedence over the shell environment.
+load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 from faster_whisper import WhisperModel
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
