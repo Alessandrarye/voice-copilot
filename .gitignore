@@ -30,3 +30,14 @@ personas/
 panel-footnote.md
 panel-ai4i.md
 ARCHIVE_QA_BRIEF.md
+
+# Demo/prep briefings, meeting notes, and generated repo context (personal content)
+demo-briefing.md
+demo-qa.md
+demo-script.md
+demo-slides.md
+ai4i-repo.md
+gomez-meeting.md
+
+# Backups
+*.bak-*
